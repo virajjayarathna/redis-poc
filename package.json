@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A POC to test ElastiCache Redis connectivity.",
   "main": "index.js",
+  "type": "module",  
   "scripts": {
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"

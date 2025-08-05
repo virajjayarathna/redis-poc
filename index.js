@@ -1,75 +1,99 @@
-// 1. Import necessary packages
-const express = require('express');
-const redis = require('redis');
-require('dotenv').config(); // This loads the .env file contents into process.env
 
-// 2. Configuration
-const PORT = process.env.PORT || 3000;
-const REDIS_URL = process.env.REDIS_URL;
+import 'dotenv/config'; 
+import express from 'express';
+import { createClient } from 'redis';
 
-if (!REDIS_URL) {
-    console.error("Error: REDIS_URL is not defined in the .env file.");
-    process.exit(1); // Exit the application if Redis URL is not set
-}
-
-// 3. Initialize Express App
 const app = express();
+const port = process.env.PORT || 3000;
 
-// 4. Create and Configure Redis Client
-console.log('Attempting to connect to Redis...');
-const redisClient = redis.createClient({
-    url: REDIS_URL
+const redisClient = createClient({
+  url: process.env.REDIS_URL
 });
 
-// --- Redis Client Event Listeners ---
+function generateDummyUSDLKRRate() {
+  const min = 300;
+  const max = 350;
+  return (Math.random() * (max - min) + min).toFixed(2);
+}
+
+app.get('/', (req, res) => {
+    res.send('Redis API application is running. See /api/usd-rates for data.');
+});
+
+
+app.post('/api/fetch-usd-rate', async (_req, res) => {
+  console.log('Received request to POST /api/fetch-usd-rate');
+  try {
+    const today = new Date();
+
+    const dateKey = new Date(today.toLocaleString('en-US', { timeZone: 'Asia/Colombo' }))
+        .toISOString()
+        .slice(0, 10); 
+    const rate = generateDummyUSDLKRRate();
+
+
+    await redisClient.hSet('usd_rates', dateKey, rate);
+
+    console.log(`Stored rate for ${dateKey}: ${rate}`);
+    res.status(201).json({ date: dateKey, rate, message: 'Dummy rate generated and stored successfully.' });
+  } catch (error) {
+    console.error('Error in /api/fetch-usd-rate:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/usd-rates', async (_req, res) => {
+  console.log('Received request to GET /api/usd-rates');
+  try {
+  
+    const ratesObject = await redisClient.hGetAll('usd_rates');
+
+
+    const result = Object.entries(ratesObject)
+      .map(([date, rate]) => ({ date, rate }))
+      .sort((a, b) => new Date(b.date) - new Date(a.date)); 
+    res.json(result);
+  } catch (error) {
+    console.error('Error in /api/usd-rates:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
 redisClient.on('connect', () => {
     console.log('Connecting to Redis...');
 });
 
 redisClient.on('ready', () => {
-    console.log('✅ Successfully connected to Redis!');
+    console.log('✅ Successfully connected and ready to process commands.');
 
-    // --- Start the periodic check ---
-    // This will run every 15 seconds to confirm the connection is live
+
     setInterval(async () => {
-        try {
-            const reply = await redisClient.ping();
-            const timestamp = new Date().toLocaleTimeString();
-            console.log(`[${timestamp}] Ping to Redis successful. Reply: ${reply}`);
-        } catch (err) {
-            console.error('Error during periodic Redis ping:', err);
-        }
-    }, 15000); // 15000 milliseconds = 15 seconds
+        const reply = await redisClient.ping();
+        const timestamp = new Date().toLocaleTimeString('en-LK', { timeZone: 'Asia/Colombo' });
+        console.log(`[${timestamp}] Redis health check successful. Ping reply: ${reply}`);
+    }, 15000); 
 });
 
-redisClient.on('error', (err) => {
-    console.error('❌ Redis connection error:', err);
-});
+redisClient.on('error', (err) => console.error('❌ Redis Client Error', err));
 
 redisClient.on('end', () => {
     console.log('Redis connection closed.');
 });
 
-// 5. Connect to Redis
-// We wrap this in an async function to handle the connection promise
-const connectToRedis = async () => {
-    try {
-        await redisClient.connect();
-    } catch (err) {
-        console.error('Failed to connect to Redis:', err);
-        // If initial connection fails, you might want to exit or retry
-        process.exit(1);
-    }
-};
 
-connectToRedis();
 
-// 6. Define a simple route for the web server
-app.get('/', (req, res) => {
-    res.send('Redis POC application is running. Check the console for connection status.');
-});
+(async () => {
+  try {
 
-// 7. Start the server
-app.listen(PORT, () => {
-    console.log(`Node.js server is running on port ${PORT}`);
-});
+    await redisClient.connect();
+    
+
+    app.listen(port, () => {
+      console.log(`🚀 Server running at http://localhost:${port}`);
+    });
+  } catch (err) {
+    console.error('🔥 Failed to connect to Redis. Application will not start.', err);
+    process.exit(1); 
+  }
+})();
